@@ -1,0 +1,9 @@
+.gradle/
+.intellijPlatform/
+.idea/
+build/
+out/
+run/
+*.iml
+
+.internal-refactor-assistant/

@@ -1,0 +1,34 @@
+oldFeatureName: main
+newFeatureName: home
+oldDisplayName: Main
+newDisplayName: Home
+oldPackagePrefix: com.abc.def.main
+newPackagePrefix: com.abc.def.home
+modules:
+  - app
+options:
+  renamePackages: true
+  renameClassesAndFiles: true
+  renameVariablesAndFunctions: false
+  renameLayouts: true
+  renameDrawables: true
+  renameFonts: false
+  renameAnim: false
+  renameRaw: false
+  renameStrings: true
+  renameDimens: true
+  renameStylesThemes: false
+  reformatCode: true
+  optimizeImports: true
+  runGradleBuildAfterRefactor: false
+  createGitCommitAfterRefactor: true
+  dryRunOnly: true
+tokens:
+  main: home
+  Main: Home
+regexRules:
+  - description: Rename toolbar asset prefix
+    pattern: "^ic_main_(.*)$"
+    replacement: "ic_home_$1"
+    targets:
+      - DRAWABLE
