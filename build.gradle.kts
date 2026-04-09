@@ -13,12 +13,12 @@ val androidStudioVersion = providers.gradleProperty("androidStudioVersion").get(
 val pluginSinceBuild = providers.gradleProperty("pluginSinceBuild").get()
 val pluginUntilBuild = providers.gradleProperty("pluginUntilBuild").get()
 
-//repositories {
-//    mavenCentral()
-//    intellijPlatform {
-//        defaultRepositories()
-//    }
-//}
+repositories {
+    mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
