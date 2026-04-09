@@ -2,23 +2,24 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    kotlin("jvm") version "2.1.21"
-    id("org.jetbrains.intellij.platform") version "2.5.0"
+    kotlin("jvm") version "2.2.20"
+    id("org.jetbrains.intellij.platform") version "2.13.1"
 }
 
 group = "com.internal"
 version = "0.1.0"
 
 val androidStudioVersion = providers.gradleProperty("androidStudioVersion").get()
+val androidStudioLocalPath = providers.gradleProperty("androidStudioLocalPath").orNull?.takeIf { it.isNotBlank() }
 val pluginSinceBuild = providers.gradleProperty("pluginSinceBuild").get()
 val pluginUntilBuild = providers.gradleProperty("pluginUntilBuild").get()
 
-//repositories {
-//    mavenCentral()
-//    intellijPlatform {
-//        defaultRepositories()
-//    }
-//}
+repositories {
+    mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
+}
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
@@ -27,7 +28,12 @@ dependencies {
     testImplementation(kotlin("test"))
 
     intellijPlatform {
-        androidStudio(androidStudioVersion)
+        if (androidStudioLocalPath != null) {
+            local(androidStudioLocalPath)
+        } else {
+            androidStudio(androidStudioVersion)
+        }
+
         bundledPlugin("org.jetbrains.android")
         bundledPlugin("com.intellij.java")
         bundledPlugin("org.jetbrains.kotlin")
