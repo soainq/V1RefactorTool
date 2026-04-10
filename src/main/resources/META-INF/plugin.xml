@@ -12,10 +12,10 @@
                description="Internal refactor preview tools"
                popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
-            <action id="InternalProjectRefactorAssistant.PreviewTemplateRename"
-                    class="com.internal.refactorassistant.action.PreviewTemplateRenameAction"
-                    text="Preview Template Rename"
-                    description="Preview package, Kotlin, and layout rename candidates without modifying files"/>
+            <action id="InternalProjectRefactorAssistant.StartReskinRefactor"
+                    class="com.internal.refactorassistant.action.StartReskinRefactorAction"
+                    text="Start Reskin Refactor Workflow"
+                    description="Scan, review, preview, and apply safe repeated reskin/refactor changes"/>
         </group>
     </actions>
 </idea-plugin>

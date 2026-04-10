@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.internal"
-version = "0.2.0"
+version = "0.3.0"
 
 val androidStudioVersion = providers.gradleProperty("androidStudioVersion").get()
 val androidStudioLocalPath = providers.gradleProperty("androidStudioLocalPath").orNull?.takeIf { it.isNotBlank() }
@@ -22,6 +22,10 @@ repositories {
 }
 
 dependencies {
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.3")
+    testImplementation(kotlin("test"))
+
     intellijPlatform {
         if (androidStudioLocalPath != null) {
             local(androidStudioLocalPath)
@@ -41,6 +45,10 @@ tasks.withType<KotlinCompile>().configureEach {
     }
 }
 
+tasks.test {
+    useJUnitPlatform()
+}
+
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
@@ -50,7 +58,7 @@ intellijPlatform {
         name.set("Internal Project Refactor Assistant")
         description.set(
             """
-            Minimal Android Studio plugin that previews package, Kotlin, and layout rename candidates without changing files.
+            Android Studio plugin for repeated reskin/refactor workflows with scan, suggestion review, preview, apply, and local JSON history.
             """.trimIndent()
         )
         vendor {
