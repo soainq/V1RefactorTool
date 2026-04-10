@@ -5,51 +5,85 @@ import com.internal.refactorassistant.model.ReviewItemState
 import com.internal.refactorassistant.model.ScannedRefactorItem
 import com.internal.refactorassistant.model.SafetyLevel
 import com.internal.refactorassistant.model.SuggestionCandidate
+import com.internal.refactorassistant.model.SuggestionSource
 import com.internal.refactorassistant.model.UsedNameEntry
 import com.internal.refactorassistant.model.UsedNameMetadata
 import com.internal.refactorassistant.model.UsedNamesRegistry
 import com.internal.refactorassistant.rules.NamingRules
+import java.util.LinkedHashSet
 import java.util.Locale
 
 class SuggestionService {
+    private val normalizer = CandidateNormalizer()
+    private val qualityValidator = CandidateQualityValidator()
+
     fun buildReviewItems(
         items: List<ScannedRefactorItem>,
         registry: UsedNamesRegistry,
+        existingNamesByType: Map<RefactorItemType, Set<String>>,
         showPreviouslyUsedNames: Boolean,
     ): List<ReviewItemState> {
-        return items.map { item ->
-            val suggestions = generateSuggestions(item, registry, showPreviouslyUsedNames)
-            val selected = suggestions.firstOrNull { !it.usedMetadata.usedBefore }?.value
-                ?: suggestions.firstOrNull()?.value
-                ?: ""
-            val applyByDefault = item.safetyLevel == SafetyLevel.SAFE_AUTO &&
-                selected.isNotBlank() &&
-                suggestions.firstOrNull { it.value == selected }?.usedMetadata?.usedBefore != true
+        val reservedNamesByType = mutableMapOf<RefactorItemType, MutableSet<String>>()
+        val groupedItems = items.groupBy(::groupKeyFor)
+        return groupedItems.entries.flatMap { (groupKey, groupItems) ->
+            val representative = groupItems.first()
+            val allSuggestions = generateSuggestions(representative, registry)
+            val visibleSuggestions = allSuggestions
+                .filter { showPreviouslyUsedNames || !it.usedMetadata.usedBefore }
+                .take(6)
+            val reservedNames = reservedNamesByType.getOrPut(representative.type) { linkedSetOf() }
+            val canonicalCandidate = pickBestCandidate(representative, allSuggestions, existingNamesByType, reservedNames)
+            val canonicalName = canonicalCandidate?.value.orEmpty()
+            val canonicalSource = canonicalCandidate?.source
+            if (canonicalName.isNotBlank()) {
+                reservedNames += canonicalName.lowercase(Locale.US)
+            }
 
-            ReviewItemState(
-                item = item,
-                suggestions = suggestions,
-                selectedNewName = selected,
-                applySelected = applyByDefault && item.safetyLevel != SafetyLevel.DO_NOT_TOUCH,
-                status = when (item.safetyLevel) {
-                    SafetyLevel.SAFE_AUTO -> "Ready"
-                    SafetyLevel.REVIEW_REQUIRED -> "Review"
-                    SafetyLevel.DO_NOT_TOUCH -> "Blocked"
-                },
-                warning = when {
-                    item.safetyLevel == SafetyLevel.DO_NOT_TOUCH -> "Protected item."
-                    suggestions.isEmpty() -> "No safe suggestion available from the dictionary."
-                    suggestions.all { it.usedMetadata.usedBefore } && !showPreviouslyUsedNames -> "All suggestions were filtered because they were used before."
-                    else -> ""
-                },
-            )
+            groupItems.map { item ->
+                val selectedCandidate = pickBestCandidate(item, allSuggestions, existingNamesByType, emptySet(), preferredName = canonicalName)
+                    ?: pickBestCandidate(item, allSuggestions, existingNamesByType, emptySet())
+                val selected = selectedCandidate?.value.orEmpty()
+                val selectedSource = selectedCandidate?.source ?: canonicalSource
+                val applyByDefault = item.safetyLevel == SafetyLevel.SAFE_AUTO &&
+                    selected.isNotBlank() &&
+                    selectedCandidate?.usedMetadata?.usedBefore != true
+
+                ReviewItemState(
+                    item = item,
+                    suggestions = visibleSuggestions,
+                    groupKey = groupKey,
+                    canonicalNewName = canonicalName,
+                    groupSize = groupItems.size,
+                    overrideApplied = canonicalName.isNotBlank() && selected.isNotBlank() && !selected.equals(canonicalName, ignoreCase = true),
+                    selectedNewName = selected,
+                    selectedSuggestionSource = selectedSource,
+                    applySelected = applyByDefault && item.safetyLevel != SafetyLevel.DO_NOT_TOUCH,
+                    status = when (item.safetyLevel) {
+                        SafetyLevel.DO_NOT_TOUCH -> "SKIPPED"
+                        else -> if (selected.isNotBlank()) "READY" else "BLOCKED"
+                    },
+                    warning = when {
+                        item.safetyLevel == SafetyLevel.DO_NOT_TOUCH -> "Protected item."
+                        allSuggestions.isEmpty() -> "No acceptable replacement candidate"
+                        selected.isBlank() -> "Blocked after all acceptable candidates conflicted with existing names, path targets, or history."
+                        visibleSuggestions.isEmpty() && !showPreviouslyUsedNames -> "All suggestions were filtered because they were used before."
+                        selectedCandidate?.normalizationNote != null -> selectedCandidate.normalizationNote
+                        selectedSource == SuggestionSource.TOKEN_ABBREVIATION -> "Compressed by abbreviation"
+                        selectedSource == SuggestionSource.EXACT_PHRASE ||
+                            selectedSource == SuggestionSource.TOKEN_SYNONYM ||
+                            selectedSource == SuggestionSource.WHOLE_PHRASE_REPLACEMENT -> "Replaced business phrase"
+                        canonicalName.isNotBlank() && !selected.equals(canonicalName, ignoreCase = true) -> "Using a non-canonical candidate because the canonical name conflicts for this item."
+                        selectedSource == SuggestionSource.RULE_FALLBACK -> "No acceptable replacement candidate"
+                        else -> ""
+                    },
+                )
+            }
         }
     }
 
     private fun generateSuggestions(
         item: ScannedRefactorItem,
         registry: UsedNamesRegistry,
-        showPreviouslyUsedNames: Boolean,
     ): List<SuggestionCandidate> {
         val rawSuggestions = when (item.type) {
             RefactorItemType.ACTIVITY,
@@ -64,92 +98,446 @@ class SuggestionService {
             RefactorItemType.DRAWABLE,
             RefactorItemType.STRING,
             RefactorItemType.DIMEN,
-            -> suggestResourceName(item.oldName, item.type)
+            -> suggestResourceName(item.oldName)
 
             RefactorItemType.PACKAGE_CHILD,
             -> suggestPackageName(item.oldName, item.details.rootPackage.orEmpty())
         }
 
-        return rawSuggestions
-            .map { NamingRules.normalizeSuggestion(item.type, it) }
-            .filter { it.isNotBlank() && it != item.oldName && NamingRules.isValidName(item.type, it) }
-            .distinct()
-            .map { suggestion ->
-                val usedEntry = registry.namesByType[item.type].orEmpty().firstOrNull { it.name.equals(suggestion, ignoreCase = true) }
-                SuggestionCandidate(
-                    value = suggestion,
-                    usedMetadata = usedEntry.toMetadata(),
-                )
-            }
-            .filter { showPreviouslyUsedNames || !it.usedMetadata.usedBefore }
-            .take(5)
-    }
-
-    private fun suggestTypeName(oldName: String, type: RefactorItemType): List<String> {
-        val suffix = listOf("Activity", "Fragment", "ViewModel", "Adapter").firstOrNull { oldName.endsWith(it) }.orEmpty()
-        val base = if (suffix.isNotBlank()) oldName.removeSuffix(suffix) else oldName
-        val replacements = replaceUsingDictionary(base)
-        return replacements.map { replacement ->
-            when (type) {
-                RefactorItemType.KOTLIN_FILE -> if (suffix.isNotBlank()) replacement + suffix else replacement
-                else -> replacement + suffix
+        val bestByValue = linkedMapOf<String, SuggestionCandidate>()
+        rawSuggestions.forEach { candidate ->
+            val normalizedCandidate = normalizer.normalize(item.type, candidate.value)
+            val normalized = normalizedCandidate.value
+            if (normalized.isBlank() || normalized == item.oldName || !NamingRules.isValidName(item.type, normalized)) return@forEach
+            val quality = qualityValidator.validate(item.type, item.oldName, normalized, candidate.source)
+            if (!quality.acceptable) return@forEach
+            val usedEntry = registry.namesByType[item.type].orEmpty().firstOrNull { it.name.equals(normalized, ignoreCase = true) }
+            val suggestion = SuggestionCandidate(
+                value = normalized,
+                rawValue = candidate.value,
+                normalizationNote = normalizedCandidate.note,
+                usedMetadata = usedEntry.toMetadata(),
+                source = candidate.source,
+            )
+            val existing = bestByValue[normalized]
+            if (existing == null || suggestion.source.priority < existing.source.priority) {
+                bestByValue[normalized] = suggestion
             }
         }
+        return bestByValue.values
+            .sortedBy { it.source.priority }
     }
 
-    private fun suggestResourceName(oldName: String, type: RefactorItemType): List<String> {
-        val tokens = oldName.split('_')
-        return replaceSnakeTokens(tokens).map { replacement ->
-            when (type) {
-                RefactorItemType.LAYOUT,
-                RefactorItemType.DRAWABLE,
-                RefactorItemType.STRING,
-                RefactorItemType.DIMEN,
-                -> replacement
+    private fun suggestTypeName(oldName: String, type: RefactorItemType): List<RawSuggestion> {
+        val words = NamingRules.splitWords(oldName)
+        if (words.isEmpty()) return emptyList()
+        val nameParts = NameStructureRules.splitByType(type, words)
+        val businessWords = nameParts.business
+        if (businessWords.isEmpty()) return emptyList()
 
-                else -> replacement
-            }
-        }
+        return buildSuggestions(
+            businessWords = businessWords,
+            protectedLeadingWords = nameParts.leading,
+            protectedTrailingWords = nameParts.trailing,
+            format = NameFormat.PASCAL,
+            fallbackWords = fallbackWordsForType(type),
+        )
     }
 
-    private fun suggestPackageName(oldPackage: String, rootPackage: String): List<String> {
+    private fun suggestResourceName(oldName: String): List<RawSuggestion> {
+        val words = NamingRules.splitWords(oldName)
+        if (words.isEmpty()) return emptyList()
+        val nameParts = NameStructureRules.splitByType(RefactorItemType.LAYOUT, words)
+        val businessWords = nameParts.business
+        if (businessWords.isEmpty()) return emptyList()
+
+        return buildSuggestions(
+            businessWords = businessWords,
+            protectedLeadingWords = nameParts.leading,
+            protectedTrailingWords = nameParts.trailing,
+            format = NameFormat.SNAKE,
+            fallbackWords = emptyList(),
+        )
+    }
+
+    private fun suggestPackageName(oldPackage: String, rootPackage: String): List<RawSuggestion> {
         val suffix = if (rootPackage.isNotBlank() && oldPackage.startsWith("$rootPackage.")) {
             oldPackage.removePrefix("$rootPackage.")
         } else {
             oldPackage
         }
-        return replacePackageTokens(suffix).map { replacement ->
-            if (rootPackage.isNotBlank()) "$rootPackage.$replacement" else replacement
-        }
-    }
-
-    private fun replaceUsingDictionary(value: String): List<String> {
-        val words = NamingRules.splitWords(value)
-        return replaceWords(words).map { NamingRules.toPascalCase(it) }
-    }
-
-    private fun replaceSnakeTokens(tokens: List<String>): List<String> =
-        replaceWords(tokens).map { NamingRules.toSnakeCase(it) }
-
-    private fun replacePackageTokens(value: String): List<String> {
-        val segments = value.split('.')
-        return replaceWords(segments).map { segmentsList ->
-            segmentsList.joinToString(".") { it.lowercase(Locale.US) }
-        }
-    }
-
-    private fun replaceWords(words: List<String>): List<List<String>> {
+        val words = NamingRules.splitWords(suffix)
         if (words.isEmpty()) return emptyList()
-        val suggestions = mutableListOf<List<String>>()
-        words.forEachIndexed { index, word ->
-            val candidates = BuiltinDictionary.mappings[word.lowercase(Locale.US)].orEmpty()
-            candidates.forEach { candidate ->
-                val updated = words.toMutableList()
-                updated[index] = candidate
-                suggestions += updated
+        val protectedLeading = words.takeWhile { it.lowercase(Locale.US) in NamingRules.protectedPackageSegments }
+        val businessWords = words.drop(protectedLeading.size)
+        if (businessWords.isEmpty()) return emptyList()
+
+        val suggestions = buildSuggestions(
+            businessWords = businessWords,
+            protectedLeadingWords = protectedLeading,
+            protectedTrailingWords = emptyList(),
+            format = NameFormat.PACKAGE,
+            fallbackWords = listOf("feature", "module", "flow"),
+        )
+        return suggestions.map { suggestion ->
+            if (rootPackage.isBlank()) suggestion else suggestion.copy(value = "$rootPackage.${suggestion.value}")
+        }
+    }
+
+    private fun buildSuggestions(
+        businessWords: List<String>,
+        protectedLeadingWords: List<String>,
+        protectedTrailingWords: List<String>,
+        format: NameFormat,
+        fallbackWords: List<String>,
+    ): List<RawSuggestion> {
+        val sink = linkedSetOf<RawSuggestion>()
+
+        addExactPhraseCandidates(sink, businessWords, protectedLeadingWords, protectedTrailingWords, format)
+        addTokenSynonymCandidates(sink, businessWords, protectedLeadingWords, protectedTrailingWords, format)
+        addTokenAbbreviationCandidates(sink, businessWords, protectedLeadingWords, protectedTrailingWords, format)
+        addWholePhraseCandidates(sink, businessWords, protectedLeadingWords, protectedTrailingWords, format)
+        if (fallbackWords.isNotEmpty()) {
+            addFallbackCandidates(sink, businessWords, protectedLeadingWords, protectedTrailingWords, format, fallbackWords)
+        }
+
+        return sink.toList()
+    }
+
+    private fun addExactPhraseCandidates(
+        sink: MutableSet<RawSuggestion>,
+        businessWords: List<String>,
+        protectedLeadingWords: List<String>,
+        protectedTrailingWords: List<String>,
+        format: NameFormat,
+    ) {
+        buildPhraseRangeVariants(
+            businessWords = businessWords,
+            replacements = BuiltinDictionary.exactPhraseSynonyms,
+        ).forEach { candidateWords ->
+            sink += RawSuggestion(
+                value = formatWords(protectedLeadingWords + candidateWords + protectedTrailingWords, format),
+                source = SuggestionSource.EXACT_PHRASE,
+            )
+        }
+    }
+
+    private fun addTokenSynonymCandidates(
+        sink: MutableSet<RawSuggestion>,
+        businessWords: List<String>,
+        protectedLeadingWords: List<String>,
+        protectedTrailingWords: List<String>,
+        format: NameFormat,
+    ) {
+        val options = businessWords.map { word ->
+            if (isDoNotReplace(word)) {
+                emptyList()
+            } else {
+                BuiltinDictionary.tokenSynonyms[word.lowercase(Locale.US)]
+                .orEmpty()
+                .map { replacement -> NamingRules.splitWords(replacement) }
+                .filter { it.isNotEmpty() }
             }
         }
-        return suggestions
+
+        if (options.none { it.isNotEmpty() }) return
+
+        val combinations = LinkedHashSet<List<String>>()
+        buildTokenCombinations(
+            words = businessWords,
+            options = options,
+            index = 0,
+            replacementsUsed = 0,
+            current = emptyList(),
+            sink = combinations,
+            limit = 12,
+        )
+
+        combinations
+            .filter { isNaturalTokenSuggestion(it.originalWordCount(businessWords), it.replacedWordCount(businessWords)) }
+            .forEach { candidateWords ->
+                sink += RawSuggestion(
+                    value = formatWords(protectedLeadingWords + candidateWords + protectedTrailingWords, format),
+                    source = SuggestionSource.TOKEN_SYNONYM,
+                )
+            }
+    }
+
+    private fun addWholePhraseCandidates(
+        sink: MutableSet<RawSuggestion>,
+        businessWords: List<String>,
+        protectedLeadingWords: List<String>,
+        protectedTrailingWords: List<String>,
+        format: NameFormat,
+    ) {
+        buildPhraseRangeVariants(
+            businessWords = businessWords,
+            replacements = BuiltinDictionary.wholePhraseReplacements,
+        ).forEach { candidateWords ->
+            sink += RawSuggestion(
+                value = formatWords(protectedLeadingWords + candidateWords + protectedTrailingWords, format),
+                source = SuggestionSource.WHOLE_PHRASE_REPLACEMENT,
+            )
+        }
+    }
+
+    private fun addTokenAbbreviationCandidates(
+        sink: MutableSet<RawSuggestion>,
+        businessWords: List<String>,
+        protectedLeadingWords: List<String>,
+        protectedTrailingWords: List<String>,
+        format: NameFormat,
+    ) {
+        val options = businessWords.map { word ->
+            if (isDoNotReplace(word)) {
+                emptyList()
+            } else {
+                BuiltinDictionary.abbreviationSynonyms[word.lowercase(Locale.US)]
+                .orEmpty()
+                .map { replacement -> NamingRules.splitWords(replacement) }
+                .filter { it.isNotEmpty() }
+            }
+        }
+
+        if (options.none { it.isNotEmpty() }) return
+
+        val combinations = LinkedHashSet<List<String>>()
+        buildTokenCombinations(
+            words = businessWords,
+            options = options,
+            index = 0,
+            replacementsUsed = 0,
+            current = emptyList(),
+            sink = combinations,
+            limit = 12,
+        )
+
+        combinations.forEach { candidateWords ->
+            sink += RawSuggestion(
+                value = formatWords(protectedLeadingWords + candidateWords + protectedTrailingWords, format),
+                source = SuggestionSource.TOKEN_ABBREVIATION,
+            )
+        }
+    }
+
+    private fun addFallbackCandidates(
+        sink: MutableSet<RawSuggestion>,
+        businessWords: List<String>,
+        protectedLeadingWords: List<String>,
+        protectedTrailingWords: List<String>,
+        format: NameFormat,
+        fallbackWords: List<String>,
+    ) {
+        fallbackWords.forEach { fallback ->
+            sink += RawSuggestion(
+                value = formatWords(protectedLeadingWords + businessWords + listOf(fallback) + protectedTrailingWords, format),
+                source = SuggestionSource.RULE_FALLBACK,
+            )
+        }
+    }
+
+    private fun buildTokenCombinations(
+        words: List<String>,
+        options: List<List<List<String>>>,
+        index: Int,
+        replacementsUsed: Int,
+        current: List<String>,
+        sink: MutableSet<List<String>>,
+        limit: Int,
+    ) {
+        if (sink.size >= limit) return
+        if (index >= words.size) {
+            if (replacementsUsed > 0) {
+                sink += current
+            }
+            return
+        }
+
+        buildTokenCombinations(
+            words = words,
+            options = options,
+            index = index + 1,
+            replacementsUsed = replacementsUsed,
+            current = current + words[index],
+            sink = sink,
+            limit = limit,
+        )
+
+        options[index].forEach { replacementWords ->
+            if (sink.size >= limit) return
+            buildTokenCombinations(
+                words = words,
+                options = options,
+                index = index + 1,
+                replacementsUsed = replacementsUsed + 1,
+                current = current + replacementWords,
+                sink = sink,
+                limit = limit,
+            )
+        }
+    }
+
+    private fun isNaturalTokenSuggestion(originalCount: Int, replacedCount: Int): Boolean {
+        if (replacedCount <= 0) return false
+        if (originalCount <= 2) return true
+        return replacedCount * 2 >= originalCount
+    }
+
+    private fun pickBestCandidate(
+        item: ScannedRefactorItem,
+        suggestions: List<SuggestionCandidate>,
+        existingNamesByType: Map<RefactorItemType, Set<String>>,
+        reservedNames: Set<String>,
+        preferredName: String? = null,
+    ): SuggestionCandidate? {
+        val preferred = preferredName
+            ?.takeIf { it.isNotBlank() }
+            ?.let { preferredValue ->
+                suggestions.firstOrNull { candidate ->
+                    candidate.value.equals(preferredValue, ignoreCase = true) &&
+                        candidate.value.isNotBlank() &&
+                        !candidate.value.equals(item.oldName, ignoreCase = true) &&
+                        !clashesWithExisting(item, candidate.value, existingNamesByType) &&
+                        !targetPathAlreadyExists(item, candidate.value)
+                }
+            }
+        if (preferred != null) return preferred
+
+        return suggestions.firstOrNull { candidate ->
+            candidate.value.isNotBlank() &&
+                !candidate.value.equals(item.oldName, ignoreCase = true) &&
+                !candidate.usedMetadata.usedBefore &&
+                !clashesWithExisting(item, candidate.value, existingNamesByType) &&
+                !targetPathAlreadyExists(item, candidate.value) &&
+                candidate.value.lowercase(Locale.US) !in reservedNames
+        } ?: suggestions.firstOrNull { candidate ->
+            candidate.value.isNotBlank() &&
+                !candidate.value.equals(item.oldName, ignoreCase = true) &&
+                !clashesWithExisting(item, candidate.value, existingNamesByType) &&
+                !targetPathAlreadyExists(item, candidate.value) &&
+                candidate.value.lowercase(Locale.US) !in reservedNames
+        }
+    }
+
+    private fun clashesWithExisting(
+        item: ScannedRefactorItem,
+        candidateName: String,
+        existingNamesByType: Map<RefactorItemType, Set<String>>,
+    ): Boolean {
+        val existingNames = existingNamesByType[item.type].orEmpty()
+        return existingNames.any { it.equals(candidateName, ignoreCase = true) && !it.equals(item.oldName, ignoreCase = true) }
+    }
+
+    private fun targetPathAlreadyExists(item: ScannedRefactorItem, candidateName: String): Boolean {
+        val currentPath = runCatching { java.nio.file.Path.of(item.absolutePath) }.getOrNull() ?: return false
+        return when (item.type) {
+            RefactorItemType.KOTLIN_FILE -> java.nio.file.Files.exists(currentPath.resolveSibling("$candidateName.kt"))
+            RefactorItemType.LAYOUT,
+            RefactorItemType.DRAWABLE,
+            -> {
+                val extension = currentPath.fileName.toString().substringAfterLast('.', "")
+                val suffix = if (extension.isBlank()) "" else ".$extension"
+                java.nio.file.Files.exists(currentPath.resolveSibling(candidateName + suffix))
+            }
+
+            RefactorItemType.PACKAGE_CHILD -> {
+                val sourceRootPath = item.details.sourceRootPath ?: return false
+                java.nio.file.Files.exists(java.nio.file.Path.of(sourceRootPath, candidateName.replace('.', '/')))
+            }
+
+            else -> false
+        }
+    }
+
+    private fun List<String>.originalWordCount(originalWords: List<String>): Int = originalWords.size
+
+    private fun List<String>.replacedWordCount(originalWords: List<String>): Int =
+        originalWords.zip(this).count { (oldWord, newWord) -> !oldWord.equals(newWord, ignoreCase = true) }
+
+    private fun buildPhraseRangeVariants(
+        businessWords: List<String>,
+        replacements: Map<String, List<String>>,
+    ): Set<List<String>> {
+        val results = LinkedHashSet<List<String>>()
+        val ranges = replaceableRanges(businessWords)
+        ranges.forEach { range ->
+            for (start in range.first..range.last) {
+                for (endInclusive in start..range.last) {
+                    val phraseWords = businessWords.subList(start, endInclusive + 1)
+                    phraseKeys(phraseWords).forEach { key ->
+                        replacements[key].orEmpty().forEach { replacement ->
+                            val replacementWords = NamingRules.splitWords(replacement)
+                            if (replacementWords.isNotEmpty()) {
+                                results += businessWords.replaceRange(start, endInclusive + 1, replacementWords)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return results
+    }
+
+    private fun replaceableRanges(words: List<String>): List<IntRange> {
+        val ranges = mutableListOf<IntRange>()
+        var rangeStart: Int? = null
+        words.forEachIndexed { index, word ->
+            if (isDoNotReplace(word)) {
+                if (rangeStart != null) {
+                    ranges += rangeStart!!..(index - 1)
+                    rangeStart = null
+                }
+            } else if (rangeStart == null) {
+                rangeStart = index
+            }
+        }
+        if (rangeStart != null) {
+            ranges += rangeStart!!..words.lastIndex
+        }
+        return ranges
+    }
+
+    private fun List<String>.replaceRange(start: Int, endExclusive: Int, replacementWords: List<String>): List<String> =
+        buildList {
+            this@replaceRange.forEachIndexed { index, word ->
+                when {
+                    index < start -> add(word)
+                    index == start -> addAll(replacementWords)
+                    index >= endExclusive -> add(word)
+                }
+            }
+        }
+
+    private fun isDoNotReplace(word: String): Boolean =
+        word.lowercase(Locale.US) in BuiltinDictionary.doNotReplaceTokens
+
+    private fun groupKeyFor(item: ScannedRefactorItem): String =
+        "${item.type.name}:${NamingRules.normalizeSuggestion(item.type, item.oldName).lowercase(Locale.US)}"
+
+    private fun phraseKeys(words: List<String>): List<String> = buildList {
+        add(words.joinToString("_") { it.lowercase(Locale.US) })
+        add(words.joinToString("") { it.lowercase(Locale.US) })
+    }.distinct()
+
+    private fun formatWords(words: List<String>, format: NameFormat): String = when (format) {
+        NameFormat.PASCAL -> NamingRules.toPascalCase(words)
+        NameFormat.SNAKE -> NamingRules.toSnakeCase(words)
+        NameFormat.PACKAGE -> words.joinToString(".") { it.lowercase(Locale.US) }
+    }
+
+    private fun fallbackWordsForType(type: RefactorItemType): List<String> = when (type) {
+        RefactorItemType.ACTIVITY,
+        RefactorItemType.FRAGMENT,
+        RefactorItemType.VIEWMODEL,
+        RefactorItemType.ADAPTER,
+        RefactorItemType.KOTLIN_CLASS,
+        RefactorItemType.KOTLIN_FILE,
+        RefactorItemType.LAYOUT,
+        RefactorItemType.DRAWABLE,
+        RefactorItemType.STRING,
+        RefactorItemType.DIMEN,
+        -> emptyList()
+        RefactorItemType.PACKAGE_CHILD -> listOf("feature", "module", "flow")
     }
 
     private fun UsedNameEntry?.toMetadata(): UsedNameMetadata = if (this == null) {
@@ -157,4 +545,25 @@ class SuggestionService {
     } else {
         UsedNameMetadata(true, lastUsedVersion, lastUsedTimestamp)
     }
+
+    private data class RawSuggestion(
+        val value: String,
+        val source: SuggestionSource,
+    )
+
+    private enum class NameFormat {
+        PASCAL,
+        SNAKE,
+        PACKAGE,
+    }
+
+    private val SuggestionSource.priority: Int
+        get() = when (this) {
+            SuggestionSource.EXACT_PHRASE -> 0
+            SuggestionSource.TOKEN_SYNONYM -> 1
+            SuggestionSource.TOKEN_ABBREVIATION -> 2
+            SuggestionSource.WHOLE_PHRASE_REPLACEMENT -> 3
+            SuggestionSource.RULE_FALLBACK -> 4
+            SuggestionSource.MANUAL -> 5
+        }
 }

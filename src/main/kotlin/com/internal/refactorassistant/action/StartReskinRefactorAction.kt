@@ -70,7 +70,11 @@ class StartReskinRefactorAction : AnAction() {
                 continue
             }
 
-            val coordinator = ReviewSelectionCoordinator(scanResult.items, loadState.registry)
+            val coordinator = ReviewSelectionCoordinator(
+                allItems = scanResult.items,
+                registry = loadState.registry,
+                existingNamesByType = scanResult.existingNamesByType,
+            )
             var reviewState = coordinator.state()
             while (true) {
                 val reviewDialog = SuggestionReviewDialog(

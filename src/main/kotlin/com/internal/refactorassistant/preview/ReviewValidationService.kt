@@ -42,35 +42,35 @@ class ReviewValidationService(
         val selectedNewName = item.selectedNewName.trim()
         if (item.item.safetyLevel.name == "DO_NOT_TOUCH") {
             blocked = true
-            warnings += "This item is marked DO_NOT_TOUCH."
+            warnings += "Do not touch"
         }
         if (item.item.type == RefactorItemType.PACKAGE_CHILD) {
             blocked = true
-            warnings += "Package rename apply is disabled in this milestone."
+            warnings += "Real conflict"
         }
         if (selectedNewName.isBlank()) {
             blocked = true
-            warnings += "Selected new name is required."
+            warnings += "No valid candidate"
         }
         if (selectedNewName == item.item.oldName) {
             blocked = true
-            warnings += "Selected new name must be different from the old name."
+            warnings += "Real conflict"
         }
         if (selectedNewName.isNotBlank() && !NamingRules.isValidName(item.item.type, selectedNewName)) {
             blocked = true
-            warnings += "Selected new name is invalid for ${item.item.type.name.lowercase(Locale.US)}."
+            warnings += "Invalid target name"
         }
         if (selectedNewName.isNotBlank() && clashesWithExisting(item, selectedNewName)) {
             blocked = true
-            warnings += "Selected new name already exists in the scanned project."
+            warnings += "Target already exists"
         }
         if (selectedNewName.isNotBlank() && targetPathAlreadyExists(item, selectedNewName)) {
             blocked = true
-            warnings += "A file or package already exists at the target path."
+            warnings += "Target already exists"
         }
         if (selectedNewName.isNotBlank() && duplicatesAnotherSelection(item, allItems, selectedNewName)) {
             blocked = true
-            warnings += "Another selected item already uses the same new name."
+            warnings += "Real conflict"
         }
 
         val usedMetadata = usedMetadata(item.item.type, selectedNewName)
@@ -99,6 +99,7 @@ class ReviewValidationService(
             other.item.id != item.item.id &&
                 other.applySelected &&
                 other.item.type == item.item.type &&
+                other.groupKey != item.groupKey &&
                 other.selectedNewName.trim().equals(selectedNewName, ignoreCase = true)
         }
     }

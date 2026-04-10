@@ -39,8 +39,8 @@ class FilesystemApplyEngine(
         reviewItems.forEach { item ->
             val row = previewStatusById[item.item.id]
             when (row?.status) {
-                "Selected" -> itemResults[item.item.id] = SessionItemResult.PREVIEWED
-                "Blocked" -> itemResults[item.item.id] = SessionItemResult.BLOCKED
+                "READY" -> itemResults[item.item.id] = SessionItemResult.PREVIEWED
+                "BLOCKED" -> itemResults[item.item.id] = SessionItemResult.BLOCKED
                 else -> itemResults[item.item.id] = SessionItemResult.SKIPPED
             }
             if (!row?.warning.isNullOrBlank()) {
@@ -49,7 +49,7 @@ class FilesystemApplyEngine(
         }
 
         val selectedItems = reviewItems.filter { item ->
-            previewStatusById[item.item.id]?.status == "Selected"
+            previewStatusById[item.item.id]?.status == "READY"
         }
         val eligibleItems = mutableListOf<ReviewItemState>()
 

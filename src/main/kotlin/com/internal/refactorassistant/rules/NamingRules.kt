@@ -12,6 +12,7 @@ object NamingRules {
     fun splitWords(value: String): List<String> {
         if (value.isBlank()) return emptyList()
         return value
+            .replace(Regex("(?<=[A-Z])(?=[A-Z][a-z])"), "_")
             .replace(Regex("(?<=[a-z0-9])(?=[A-Z])"), "_")
             .replace(Regex("[^A-Za-z0-9.]+"), "_")
             .trim('_')

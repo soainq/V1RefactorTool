@@ -79,9 +79,23 @@ data class UsedNameMetadata(
     val lastUsedTimestamp: String?,
 )
 
+enum class SuggestionSource(
+    val rank: Int,
+) {
+    EXACT_PHRASE(1),
+    TOKEN_SYNONYM(2),
+    TOKEN_ABBREVIATION(3),
+    WHOLE_PHRASE_REPLACEMENT(4),
+    RULE_FALLBACK(5),
+    MANUAL(6),
+}
+
 data class SuggestionCandidate(
     val value: String,
+    val rawValue: String,
+    val normalizationNote: String?,
     val usedMetadata: UsedNameMetadata,
+    val source: SuggestionSource,
 )
 
 data class ScannedRefactorItem(
@@ -116,7 +130,12 @@ data class ItemDetails(
 data class ReviewItemState(
     val item: ScannedRefactorItem,
     val suggestions: List<SuggestionCandidate>,
+    val groupKey: String,
+    val canonicalNewName: String,
+    val groupSize: Int,
+    var overrideApplied: Boolean,
     var selectedNewName: String,
+    var selectedSuggestionSource: SuggestionSource?,
     var applySelected: Boolean,
     var status: String,
     var warning: String,
@@ -132,6 +151,14 @@ data class PreviewRow(
     val safetyLevel: SafetyLevel,
     val before: String,
     val after: String,
+    val rawCandidate: String,
+    val normalizationNote: String,
+    val groupKey: String,
+    val canonicalNewName: String,
+    val groupSize: Int,
+    val overrideStatus: String,
+    val suggestionSource: String,
+    val candidateRank: String,
     val moduleName: String,
     val path: String,
     val status: String,

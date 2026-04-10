@@ -7,6 +7,7 @@ import com.internal.refactorassistant.model.ScanSettings
 import com.internal.refactorassistant.model.ScannedRefactorItem
 import com.internal.refactorassistant.model.SafetyLevel
 import com.internal.refactorassistant.model.SuggestionCandidate
+import com.internal.refactorassistant.model.SuggestionSource
 import com.internal.refactorassistant.model.UsedNameMetadata
 
 object TestFixtures {
@@ -39,12 +40,20 @@ object TestFixtures {
         suggestions = suggestions.map {
             SuggestionCandidate(
                 value = it,
+                rawValue = it,
+                normalizationNote = null,
                 usedMetadata = UsedNameMetadata(false, null, null),
+                source = SuggestionSource.EXACT_PHRASE,
             )
         },
+        groupKey = "${item.type.name}:${item.oldName.lowercase()}",
+        canonicalNewName = selectedNewName,
+        groupSize = 1,
+        overrideApplied = false,
         selectedNewName = selectedNewName,
+        selectedSuggestionSource = SuggestionSource.EXACT_PHRASE,
         applySelected = applySelected,
-        status = "Ready",
+        status = "READY",
         warning = warning,
     )
 

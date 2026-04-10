@@ -19,36 +19,51 @@ class PreviewBuilder(
             val status = when {
                 !item.applySelected -> {
                     skipped += 1
-                    "Skipped"
+                    "SKIPPED"
                 }
 
                 validation.blocked -> {
                     blocked += 1
-                    "Blocked"
+                    "BLOCKED"
                 }
 
-                else -> "Selected"
+                else -> "READY"
             }
             warnings += validation.warnings
+            val reason = when {
+                !item.applySelected && item.item.safetyLevel == com.internal.refactorassistant.model.SafetyLevel.DO_NOT_TOUCH -> "Do not touch"
+                !item.applySelected -> "User skipped"
+                validation.blocked -> validation.warnings.firstOrNull().orEmpty().ifBlank { "Real conflict" }
+                validation.warnings.isNotEmpty() -> validation.warnings.first()
+                else -> "OK"
+            }
 
             PreviewRow(
                 type = item.item.type,
                 safetyLevel = item.item.safetyLevel,
                 before = item.item.oldName,
                 after = item.selectedNewName,
+                rawCandidate = item.suggestions.firstOrNull { it.value == item.selectedNewName }?.rawValue ?: item.selectedNewName,
+                normalizationNote = item.suggestions.firstOrNull { it.value == item.selectedNewName }?.normalizationNote.orEmpty(),
+                groupKey = item.groupKey,
+                canonicalNewName = item.canonicalNewName,
+                groupSize = item.groupSize,
+                overrideStatus = if (item.overrideApplied) "OVERRIDDEN" else "CANONICAL",
+                suggestionSource = item.selectedSuggestionSource?.name ?: "",
+                candidateRank = item.selectedSuggestionSource?.rank?.toString().orEmpty(),
                 moduleName = item.item.moduleName,
                 path = item.item.displayPath,
                 status = status,
-                warning = validation.warnings.joinToString(" "),
+                warning = reason,
             )
         }
 
         val summary = PreviewSummary(
-            selectedCount = rows.count { it.status == "Selected" },
+            selectedCount = rows.count { it.status == "READY" },
             skippedCount = skipped,
             blockedCount = blocked,
             selectedCountByGroup = rows
-                .filter { it.status == "Selected" }
+                .filter { it.status == "READY" }
                 .groupingBy { row ->
                     TypeGrouping.primaryGroup(
                         reviewItems.first {

@@ -14,7 +14,13 @@ class SuggestionTableModel(
         "Selected",
         "Type",
         "Old name",
+        "Group Key",
+        "Canonical New Name",
+        "Group Size",
+        "Override Status",
         "Suggested names",
+        "Suggestion source",
+        "Candidate rank",
         "Selected new name",
         "Safety level",
         "Used before",
@@ -35,7 +41,7 @@ class SuggestionTableModel(
     override fun getColumnClass(columnIndex: Int): Class<*> =
         if (columnIndex == 0) java.lang.Boolean::class.java else String::class.java
 
-    override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = columnIndex == 0 || columnIndex == 4
+    override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = columnIndex == 0 || columnIndex == 10
 
     override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
         val row = rows[rowIndex]
@@ -45,22 +51,34 @@ class SuggestionTableModel(
             0 -> row.applySelected
             1 -> row.item.type.name
             2 -> row.item.oldName
-            3 -> row.suggestions.joinToString(", ") { suggestion ->
-                if (suggestion.usedMetadata.usedBefore) "${suggestion.value} (used)" else suggestion.value
+            3 -> row.groupKey
+            4 -> row.canonicalNewName
+            5 -> row.groupSize.toString()
+            6 -> if (row.overrideApplied) "OVERRIDDEN" else "CANONICAL"
+            7 -> row.suggestions.joinToString(", ") { suggestion ->
+                buildString {
+                    append(suggestion.value)
+                    append(" [")
+                    append(suggestion.source.name)
+                    append("]")
+                    if (suggestion.usedMetadata.usedBefore) append(" (used)")
+                }
             }
 
-            4 -> row.selectedNewName
-            5 -> row.item.safetyLevel.name
-            6 -> if (usedMetadata.usedBefore) "Yes" else "No"
-            7 -> usedMetadata.lastUsedVersion.orEmpty()
-            8 -> usedMetadata.lastUsedTimestamp.orEmpty()
-            9 -> when {
-                !row.applySelected -> "Skip"
-                validation.blocked -> "Blocked"
+            8 -> row.selectedSuggestionSource?.name.orEmpty()
+            9 -> row.selectedSuggestionSource?.rank?.toString().orEmpty()
+            10 -> row.selectedNewName
+            11 -> row.item.safetyLevel.name
+            12 -> if (usedMetadata.usedBefore) "Yes" else "No"
+            13 -> usedMetadata.lastUsedVersion.orEmpty()
+            14 -> usedMetadata.lastUsedTimestamp.orEmpty()
+            15 -> when {
+                !row.applySelected -> "SKIPPED"
+                validation.blocked -> "BLOCKED"
                 else -> row.status
             }
 
-            10 -> validation.warnings.joinToString(" ")
+            16 -> validation.warnings.joinToString(" ")
             else -> ""
         }
     }
@@ -74,7 +92,7 @@ class SuggestionTableModel(
                 onSelectionChanged(row.item.id, selected)
             }
 
-            4 -> {
+            10 -> {
                 val value = aValue?.toString()?.trim().orEmpty()
                 row.selectedNewName = value
                 onManualNameChanged(row.item.id, value)

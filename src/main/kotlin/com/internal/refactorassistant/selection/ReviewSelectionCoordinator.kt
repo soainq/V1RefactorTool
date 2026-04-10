@@ -1,28 +1,33 @@
 package com.internal.refactorassistant.selection
 
 import com.internal.refactorassistant.model.GroupSelectionInfo
+import com.internal.refactorassistant.model.RefactorItemType
 import com.internal.refactorassistant.model.RefactorSelectionGroup
 import com.internal.refactorassistant.model.ReviewItemState
 import com.internal.refactorassistant.model.ReviewScreenState
 import com.internal.refactorassistant.model.ScannedRefactorItem
 import com.internal.refactorassistant.model.SafetyLevel
+import com.internal.refactorassistant.model.SuggestionSource
 import com.internal.refactorassistant.model.UsedNamesRegistry
 import com.internal.refactorassistant.suggest.SuggestionService
 
 class ReviewSelectionCoordinator(
     private val allItems: List<ScannedRefactorItem>,
     private val registry: UsedNamesRegistry,
+    private val existingNamesByType: Map<RefactorItemType, Set<String>> = emptyMap(),
     private val suggestionService: SuggestionService = SuggestionService(),
 ) {
     private val selectedGroups = defaultSelectedGroups(allItems).toMutableSet()
     private val itemSelectionOverrides = mutableMapOf<String, Boolean>()
-    private val manualNameOverrides = mutableMapOf<String, String>()
+    private val groupNameOverrides = mutableMapOf<String, String>()
+    private val itemNameOverrides = mutableMapOf<String, String>()
     private var showPreviouslyUsedNames: Boolean = false
 
     init {
         suggestionService.buildReviewItems(
             items = currentActiveItems(),
             registry = registry,
+            existingNamesByType = existingNamesByType,
             showPreviouslyUsedNames = showPreviouslyUsedNames,
         ).forEach { reviewItem ->
             itemSelectionOverrides[reviewItem.item.id] = reviewItem.applySelected
@@ -78,7 +83,12 @@ class ReviewSelectionCoordinator(
     }
 
     fun setManualName(itemId: String, name: String): ReviewScreenState {
-        manualNameOverrides[itemId] = name
+        itemNameOverrides[itemId] = name
+        return rebuild()
+    }
+
+    fun setGroupCanonicalName(groupKey: String, name: String): ReviewScreenState {
+        groupNameOverrides[groupKey] = name
         return rebuild()
     }
 
@@ -92,16 +102,31 @@ class ReviewSelectionCoordinator(
         val baseItems = suggestionService.buildReviewItems(
             items = activeItems,
             registry = registry,
+            existingNamesByType = existingNamesByType,
             showPreviouslyUsedNames = showPreviouslyUsedNames,
         )
 
         val mergedItems = baseItems.map { built ->
-            val manualName = manualNameOverrides[built.item.id]
+            val groupName = groupNameOverrides[built.groupKey]
+            val itemName = itemNameOverrides[built.item.id]
             val applySelection = itemSelectionOverrides[built.item.id]
+            val selectedName = when {
+                !itemName.isNullOrBlank() -> itemName
+                !groupName.isNullOrBlank() -> groupName
+                else -> built.selectedNewName
+            }
+            val overrideApplied = when {
+                !itemName.isNullOrBlank() -> !itemName.equals(groupName ?: built.canonicalNewName, ignoreCase = true)
+                !groupName.isNullOrBlank() -> false
+                else -> built.overrideApplied
+            }
             built.copy(
-                selectedNewName = when {
-                    !manualName.isNullOrBlank() -> manualName
-                    else -> built.selectedNewName
+                canonicalNewName = groupName ?: built.canonicalNewName,
+                selectedNewName = selectedName,
+                overrideApplied = overrideApplied,
+                selectedSuggestionSource = when {
+                    !itemName.isNullOrBlank() || !groupName.isNullOrBlank() -> SuggestionSource.MANUAL
+                    else -> built.selectedSuggestionSource
                 },
                 applySelected = applySelection ?: built.applySelected,
             )

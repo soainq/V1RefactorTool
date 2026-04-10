@@ -57,6 +57,34 @@ class ReviewSelectionCoordinatorTest {
         )
     }
 
+    @Test
+    fun `group canonical edit propagates to all children`() {
+        val coordinator = duplicateNameCoordinator()
+        val initial = coordinator.state()
+        val groupKey = initial.reviewItems.first().groupKey
+
+        val updated = coordinator.setGroupCanonicalName(groupKey, "SharedHomeActivity")
+
+        assertTrue(updated.reviewItems.all { it.selectedNewName == "SharedHomeActivity" })
+        assertTrue(updated.reviewItems.all { !it.overrideApplied })
+    }
+
+    @Test
+    fun `child override does not change group default`() {
+        val coordinator = duplicateNameCoordinator()
+        val initial = coordinator.state()
+        val groupKey = initial.reviewItems.first().groupKey
+        coordinator.setGroupCanonicalName(groupKey, "SharedHomeActivity")
+
+        val updated = coordinator.setManualName("activity-b", "UniqueLandingActivity")
+
+        assertEquals("SharedHomeActivity", updated.reviewItems.first { it.item.id == "activity-a" }.canonicalNewName)
+        assertEquals("SharedHomeActivity", updated.reviewItems.first { it.item.id == "activity-a" }.selectedNewName)
+        assertEquals("UniqueLandingActivity", updated.reviewItems.first { it.item.id == "activity-b" }.selectedNewName)
+        assertTrue(updated.reviewItems.first { it.item.id == "activity-b" }.overrideApplied)
+        assertFalse(updated.reviewItems.first { it.item.id == "activity-a" }.overrideApplied)
+    }
+
     private fun coordinator(): ReviewSelectionCoordinator = ReviewSelectionCoordinator(
         allItems = listOf(
             TestFixtures.scannedItem(
@@ -74,6 +102,24 @@ class ReviewSelectionCoordinatorTest {
                 type = RefactorItemType.PACKAGE_CHILD,
                 oldName = "com.example.app.feature.main",
                 safetyLevel = SafetyLevel.REVIEW_REQUIRED,
+            ),
+        ),
+        registry = UsedNamesRegistry(),
+    )
+
+    private fun duplicateNameCoordinator(): ReviewSelectionCoordinator = ReviewSelectionCoordinator(
+        allItems = listOf(
+            TestFixtures.scannedItem(
+                id = "activity-a",
+                type = RefactorItemType.ACTIVITY,
+                oldName = "MainActivity",
+                absolutePath = "C:/tmp/featureA/MainActivity.kt",
+            ),
+            TestFixtures.scannedItem(
+                id = "activity-b",
+                type = RefactorItemType.ACTIVITY,
+                oldName = "MainActivity",
+                absolutePath = "C:/tmp/featureB/MainActivity.kt",
             ),
         ),
         registry = UsedNamesRegistry(),
