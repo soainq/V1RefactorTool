@@ -42,8 +42,8 @@ object SessionRecordFactory {
             items = reviewItems.map { item ->
                 val row = itemResults[item.item.id]
                 val result = when (row?.status) {
-                    "Selected" -> SessionItemResult.PREVIEWED
-                    "Blocked" -> SessionItemResult.BLOCKED
+                    "READY" -> SessionItemResult.PREVIEWED
+                    "BLOCKED" -> SessionItemResult.BLOCKED
                     else -> SessionItemResult.SKIPPED
                 }
                 SessionItemRecord(

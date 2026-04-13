@@ -4,9 +4,12 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.progress.ProgressManager
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.ThrowableComputable
+import com.internal.refactorassistant.ai.cache.SemanticSuggestionCache
+import com.internal.refactorassistant.ai.provider.HybridSuggestionCoordinator
 import com.internal.refactorassistant.classify.ItemClassifier
 import com.internal.refactorassistant.executor.FilesystemApplyEngine
 import com.internal.refactorassistant.executor.IdePostProcessor
@@ -19,9 +22,12 @@ import com.internal.refactorassistant.model.ScanSettings
 import com.internal.refactorassistant.model.SessionItemResult
 import com.internal.refactorassistant.preview.PreviewBuilder
 import com.internal.refactorassistant.preview.ReviewValidationService
+import com.internal.refactorassistant.result.ApplyResultBuilder
 import com.internal.refactorassistant.report.SessionRecordFactory
 import com.internal.refactorassistant.scan.ProjectScanner
 import com.internal.refactorassistant.selection.ReviewSelectionCoordinator
+import com.internal.refactorassistant.settings.ApiKeyRequirementGuard
+import com.internal.refactorassistant.suggest.BuiltinDictionary
 import com.internal.refactorassistant.ui.ApplyResultDialog
 import com.internal.refactorassistant.ui.PreviewPlanDialog
 import com.internal.refactorassistant.ui.ScanSettingsDialog
@@ -44,16 +50,21 @@ class StartReskinRefactorAction : AnAction() {
         val projectFiles = ProjectRefactorPaths.resolve(basePath)
         val historyRepository = HistoryRepository()
         val loadState = historyRepository.load(projectFiles)
+        val builtinLoadWarnings = BuiltinDictionary.loadWarnings
         var initialSettings: ScanSettings? = null
         while (true) {
             val scanDialog = ScanSettingsDialog(
                 project = project,
                 moduleNames = scanModuleNames(project),
-                loadWarnings = loadState.warnings,
+                loadWarnings = (loadState.warnings + builtinLoadWarnings).distinct(),
                 initialSettings = initialSettings,
             )
             if (!scanDialog.showAndGet()) {
                 return
+            }
+            scanDialog.applyAiSettings()
+            if (!ApiKeyRequirementGuard().ensureApiKey(project)) {
+                continue
             }
 
             val settings = scanDialog.toScanSettings()
@@ -74,6 +85,11 @@ class StartReskinRefactorAction : AnAction() {
                 allItems = scanResult.items,
                 registry = loadState.registry,
                 existingNamesByType = scanResult.existingNamesByType,
+                suggestionCoordinator = HybridSuggestionCoordinator(
+                    cacheFactory = { _ ->
+                        SemanticSuggestionCache(java.nio.file.Path.of(basePath, ".internal-refactor-assistant", "gemini-cache.json"))
+                    }
+                ),
             )
             var reviewState = coordinator.state()
             while (true) {
@@ -83,7 +99,7 @@ class StartReskinRefactorAction : AnAction() {
                     coordinator = coordinator,
                     initialState = reviewState,
                     registry = loadState.registry,
-                    topWarnings = loadState.warnings,
+                    topWarnings = (loadState.warnings + builtinLoadWarnings).distinct(),
                 )
                 when (reviewDialog.showAndGetChoice()) {
                     SuggestionReviewDialog.Choice.CANCEL -> return
@@ -130,13 +146,9 @@ class StartReskinRefactorAction : AnAction() {
                         }
                         ApplyResultDialog(
                             project = project,
-                            result = ApplyResult(
-                                appliedCount = outcome.itemResults.values.count { it == SessionItemResult.APPLIED },
-                                skippedCount = outcome.itemResults.values.count { it == SessionItemResult.SKIPPED || it == SessionItemResult.BLOCKED },
-                                failedCount = outcome.itemResults.values.count { it == SessionItemResult.FAILED },
-                                warnings = outcome.warnings,
-                                errors = outcome.errors,
-                                changedFiles = outcome.changedFiles,
+                            result = ApplyResultBuilder.build(
+                                reviewItems = reviewItems,
+                                outcome = outcome,
                                 sessionLogPath = sessionLogPath,
                             ),
                         ).show()
@@ -155,7 +167,12 @@ class StartReskinRefactorAction : AnAction() {
         settings: com.internal.refactorassistant.model.ScanSettings,
         validator: ReviewValidationService,
     ): ApplyExecutionOutcome {
-        val engine = FilesystemApplyEngine(validator)
+        val indicator = ProgressManager.getInstance().progressIndicator
+        val engine = FilesystemApplyEngine(
+            validator = validator,
+            project = project,
+            progressReporter = { update -> updateApplyProgress(indicator, update) },
+        )
         val outcome = runWithProgress(project, "Applying selected refactor items") {
             var result: ApplyExecutionOutcome? = null
             WriteCommandAction.runWriteCommandAction(project) {
@@ -170,9 +187,27 @@ class StartReskinRefactorAction : AnAction() {
         }
 
         runWithProgress(project, "Reformatting changed files") {
+            IdePostProcessor().syncAfterApply(project, outcome.changedFiles)
             IdePostProcessor().reformat(project, outcome.changedFiles)
         }
         return outcome
+    }
+
+    private fun updateApplyProgress(
+        indicator: ProgressIndicator?,
+        update: com.internal.refactorassistant.model.ApplyProgressUpdate,
+    ) {
+        indicator ?: return
+        indicator.text = "Applying ${update.processedItems}/${update.totalItems}"
+        indicator.text2 = buildString {
+            append("Current item: ${update.currentItemLabel}")
+            append(" | Success: ${update.successCount}")
+            append(" | Failed: ${update.failedCount}")
+            append(" | Skipped: ${update.skippedCount}")
+        }
+        if (update.totalItems > 0) {
+            indicator.fraction = update.processedItems.toDouble() / update.totalItems.toDouble()
+        }
     }
 
     private fun scanModuleNames(project: Project): List<String> =

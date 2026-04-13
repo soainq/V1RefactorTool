@@ -69,6 +69,32 @@ class SuggestionServiceTest {
     }
 
     @Test
+    fun `main fragment becomes home fragment`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.FRAGMENT,
+            oldName = "MainFragment",
+        )
+
+        val result = service.buildReviewItems(listOf(item), UsedNamesRegistry(), emptyMap(), showPreviouslyUsedNames = false).first()
+
+        assertEquals("HomeFragment", result.selectedNewName)
+        assertEquals("READY", result.status)
+    }
+
+    @Test
+    fun `setting viewmodel becomes preference viewmodel`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.VIEWMODEL,
+            oldName = "SettingViewModel",
+        )
+
+        val result = service.buildReviewItems(listOf(item), UsedNamesRegistry(), emptyMap(), showPreviouslyUsedNames = false).first()
+
+        assertEquals("PreferenceViewModel", result.selectedNewName)
+        assertEquals("READY", result.status)
+    }
+
+    @Test
     fun `exact phrase replacement is preferred for resource`() {
         val item = TestFixtures.scannedItem(
             type = RefactorItemType.DRAWABLE,
@@ -94,6 +120,19 @@ class SuggestionServiceTest {
     }
 
     @Test
+    fun `bottom sheet becomes bot sheet`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.STRING,
+            oldName = "bottom_sheet",
+        )
+
+        val result = service.buildReviewItems(listOf(item), UsedNamesRegistry(), emptyMap(), showPreviouslyUsedNames = false).first()
+
+        assertEquals("bot_sheet", result.selectedNewName)
+        assertEquals("READY", result.status)
+    }
+
+    @Test
     fun `fragment item detail becomes fragment entry info`() {
         val item = TestFixtures.scannedItem(
             type = RefactorItemType.LAYOUT,
@@ -116,6 +155,22 @@ class SuggestionServiceTest {
 
         assertEquals("LangPreferenceActivity", result.selectedNewName)
         assertEquals(SuggestionSource.EXACT_PHRASE, result.selectedSuggestionSource)
+    }
+
+    @Test
+    fun `feedback bottom sheet becomes response bottom sheet`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.KOTLIN_CLASS,
+            oldName = "FeedbackBottomSheet",
+        )
+
+        val result = service.buildReviewItems(listOf(item), UsedNamesRegistry(), emptyMap(), showPreviouslyUsedNames = false).first()
+
+        assertTrue(
+            result.selectedNewName == "ResponseBottomSheet" ||
+                result.selectedNewName == "ResponseBotSheet"
+        )
+        assertEquals("READY", result.status)
     }
 
     @Test
@@ -232,6 +287,43 @@ class SuggestionServiceTest {
     }
 
     @Test
+    fun `reverse abbreviation mapping supports icon shorthand`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.DRAWABLE,
+            oldName = "ic_setting",
+        )
+
+        val result = service.buildReviewItems(
+            items = listOf(item),
+            registry = UsedNamesRegistry(),
+            existingNamesByType = emptyMap(),
+            showPreviouslyUsedNames = false,
+        ).first()
+
+        assertEquals("ic_preference", result.selectedNewName)
+        assertFalse(result.selectedNewName.contains("setting"))
+    }
+
+    @Test
+    fun `locale alias mapping supports french and vietnamese codes`() {
+        val french = service.buildReviewItems(
+            items = listOf(TestFixtures.scannedItem(type = RefactorItemType.STRING, oldName = "language_fr")),
+            registry = UsedNamesRegistry(),
+            existingNamesByType = emptyMap(),
+            showPreviouslyUsedNames = false,
+        ).first()
+        val vietnamese = service.buildReviewItems(
+            items = listOf(TestFixtures.scannedItem(type = RefactorItemType.STRING, oldName = "vietnamese_title")),
+            registry = UsedNamesRegistry(),
+            existingNamesByType = emptyMap(),
+            showPreviouslyUsedNames = false,
+        ).first()
+
+        assertTrue(french.suggestions.any { it.value.contains("french") || it.value.contains("fr") })
+        assertTrue(vietnamese.suggestions.any { it.value.contains("vi") || it.value.contains("vietnam") })
+    }
+
+    @Test
     fun `duplicated suffixes are normalized away`() {
         val item = TestFixtures.scannedItem(
             type = RefactorItemType.DRAWABLE,
@@ -337,6 +429,45 @@ class SuggestionServiceTest {
         ).first()
 
         assertEquals("LocaleModel", result.selectedNewName)
+        assertEquals("READY", result.status)
+    }
+
+    @Test
+    fun `language item becomes language entry or locale entry`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.KOTLIN_CLASS,
+            oldName = "LanguageItem",
+        )
+
+        val result = service.buildReviewItems(
+            items = listOf(item),
+            registry = UsedNamesRegistry(),
+            existingNamesByType = emptyMap(),
+            showPreviouslyUsedNames = false,
+        ).first()
+
+        assertTrue(
+            result.selectedNewName == "LanguageEntry" ||
+                result.selectedNewName == "LocaleEntry"
+        )
+        assertEquals("READY", result.status)
+    }
+
+    @Test
+    fun `main is not blocked by do not replace for business rename`() {
+        val item = TestFixtures.scannedItem(
+            type = RefactorItemType.ACTIVITY,
+            oldName = "MainActivity",
+        )
+
+        val result = service.buildReviewItems(
+            items = listOf(item),
+            registry = UsedNamesRegistry(),
+            existingNamesByType = emptyMap(),
+            showPreviouslyUsedNames = false,
+        ).first()
+
+        assertEquals("HomeActivity", result.selectedNewName)
         assertEquals("READY", result.status)
     }
 

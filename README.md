@@ -240,17 +240,31 @@ Used for meaningful abbreviations such as:
 
 ### `do-not-replace.json`
 
-Used for tokens that should stay stable unless the user manually overrides them.
+Used only for Android default folders, source sets, and generated structural names that should not be treated as business rename targets.
 
-Các token mặc định không nên bị đổi bừa:
+Chỉ dùng cho Android default folders, source sets, và các tên cấu trúc sinh sẵn của Android Studio. Không dùng file này để chặn business token như `language`, `setting`, `reward`, `bottom_sheet`, `activity`, `fragment`.
 
-- `base`
-- `core`
-- `app`
-- `data`
-- `di`
-- `ui`
-- `util`
+Các token mặc định:
+
+- `manifest`
+- `res`
+- `drawable`
+- `layout`
+- `values`
+- `xml`
+- `font`
+- `mipmap`
+- `menu`
+- `anim`
+- `animator`
+- `color`
+- `navigation`
+- `raw`
+- `main`
+- `debug`
+- `release`
+- `test`
+- `androidtest`
 
 ## How To Extend Data | Cách thêm dữ liệu mới
 
@@ -281,7 +295,7 @@ Các token mặc định không nên bị đổi bừa:
 ### Block replacement for a token | Chặn thay một token
 
 ```json
-"tokens": ["base", "core", "ui"]
+"tokens": ["manifest", "layout", "debug"]
 ```
 
 Priority reminder:
@@ -289,6 +303,108 @@ Priority reminder:
 - synonym wins over abbreviation
 - abbreviation wins over lower-ranked phrase replacement only if ranked above it
 - fallback is last resort only
+
+## Gemini Semantic Provider | Bộ semantic provider dùng Gemini
+
+This plugin version also supports an optional semantic rename provider backed by the Google Gemini Developer API free tier.
+
+Version này hỗ trợ thêm một semantic rename provider tùy chọn dùng Google Gemini Developer API free tier.
+
+Important:
+
+- Gemini only helps generate better rename candidates.
+- Gemini never applies refactor directly.
+- Gemini never bypasses:
+  - normalizer
+  - candidate quality validator
+  - used-name filter
+  - conflict checker
+  - preview
+
+### Provider modes
+
+- `Rule-based only`
+- `Gemini assist`
+- `Gemini preferred`
+
+Recommended starting mode:
+
+- `Gemini assist`
+
+### How to add an API key
+
+When Gemini mode requires an API key and no key is available, the plugin shows an API key prompt right after `Scan Settings` and before the scan actually starts.
+
+Khi mode Gemini cần API key mà chưa có key hiệu lực, plugin sẽ hiện popup nhập key ngay sau `Scan Settings` và trước khi scan thực sự bắt đầu.
+
+Prompt fields:
+
+- `API Key`
+- `Show / Hide`
+- `Save API key`
+- `Continue`
+- `Cancel`
+
+Behavior:
+
+- if `Save API key` is checked:
+  - the key is stored in plugin settings and reused later
+- if `Save API key` is not checked:
+  - the key is used only for the current IDE session
+  - it is not persisted after restart
+
+You can also configure the same values in:
+
+`Tools > Android Studio V1_Refactor Plugin`
+
+### How to verify AI is active in `runIde`
+
+1. Run:
+
+```bash
+./gradlew runIde
+```
+
+2. In the sandbox IDE, open:
+   `Tools > Internal Refactor > Start Reskin Refactor Workflow`
+3. In `Scan Settings`, check the new `AI provider` section.
+4. Change `Provider mode` to:
+   - `Gemini assist`
+   - or `Gemini preferred`
+5. If no API key is configured yet, the plugin will show the API key popup before scan starts.
+6. If `Provider mode` is `Rule-based only`, no API key popup will appear.
+
+If you do not see the AI section in `Scan Settings`, you are still running an older plugin build or an older sandbox plugin cache.
+
+### Free tier behavior
+
+- Free tier is intended for testing and light usage.
+- Quota and rate limits are lower than paid tiers.
+- If Gemini returns malformed JSON, rate-limit errors, quota failures, or network failures:
+  - the plugin does not crash
+  - preview still works
+  - the plugin falls back to the rule-based provider
+
+### Caching
+
+Gemini responses can be cached locally in:
+
+```text
+.internal-refactor-assistant/gemini-cache.json
+```
+
+Cache key:
+
+- `type + oldName + context hash`
+
+This helps reduce repeated free-tier calls for the same item/context.
+
+### Key management
+
+- API keys are never hardcoded in source code.
+- API key fields are hidden by default.
+- The settings screen includes `Clear saved API key`.
+- Logging must never print the full key; only masked forms should be shown when needed.
 
 ## Review UI | Màn hình review
 
@@ -326,26 +442,35 @@ Override behavior:
 
 ## Preview UI | Màn hình preview
 
-The preview dialog summarizes:
+The main preview table shows only:
+
+- `Type`
+- `Before`
+- `After`
+- `Status`
+- `Reason`
+- `Path`
+
+Debug-only data stays hidden by default and only appears in detail/debug panels when needed.
+
+Bảng preview chính chỉ hiển thị:
+
+- `Type`
+- `Before`
+- `After`
+- `Status`
+- `Reason`
+- `Path`
+
+Các field debug như raw candidate, source, rank, canonical name, group key, normalization details sẽ bị ẩn mặc định.
+
+The preview dialog also summarizes:
 
 - selected item count
 - skipped item count
 - blocked item count
 - selected count by type group
 - preview log location
-
-It also shows per-row details:
-
-- before
-- after
-- group key
-- canonical new name
-- override status
-- suggestion source
-- candidate rank
-- status
-- warning
-- path
 
 ## Project Files And Session Logs | File dữ liệu của project và session
 
@@ -389,11 +514,29 @@ Lưu log của từng phiên preview/apply.
 ### Suggestion and selection
 
 - `src/main/kotlin/com/internal/refactorassistant/suggest/SuggestionService.kt`
-  candidate generation, ranking, canonical group suggestion
+  candidate generation, normalization, ranking, and canonical group suggestion
 - `src/main/kotlin/com/internal/refactorassistant/suggest/SuggestionDataLoader.kt`
-  loads default JSON resources
+  loads and validates default JSON resources with readable fallback warnings
 - `src/main/kotlin/com/internal/refactorassistant/suggest/BuiltinDictionary.kt`
-  exposes loaded default data
+  exposes loaded default data and load warnings
+- `src/main/kotlin/com/internal/refactorassistant/suggest/CandidateNormalizer.kt`
+  removes duplicate/semantic-duplicate tokens before preview and apply
+- `src/main/kotlin/com/internal/refactorassistant/suggest/CandidateQualityValidator.kt`
+  rejects forbidden outputs such as `oldName + Core/Screen/Info/...`
+- `src/main/kotlin/com/internal/refactorassistant/ai/provider/RuleBasedRenameProvider.kt`
+  wraps the existing rule-based suggestion engine
+- `src/main/kotlin/com/internal/refactorassistant/ai/provider/GeminiSemanticRenameProvider.kt`
+  calls Gemini and parses JSON-only semantic rename responses
+- `src/main/kotlin/com/internal/refactorassistant/ai/context/CodeContextCollector.kt`
+  collects snippet, symbols, related names, reverse abbreviations, and locale aliases before AI requests
+- `src/main/kotlin/com/internal/refactorassistant/ai/provider/HybridSuggestionCoordinator.kt`
+  runs Gemini first when AI mode is enabled, then merges rule-based candidates under the same validator/normalizer pipeline
+- `src/main/kotlin/com/internal/refactorassistant/ai/prompt/GeminiPromptFactory.kt`
+  builds compact structured prompts for Gemini
+- `src/main/kotlin/com/internal/refactorassistant/ai/cache/SemanticSuggestionCache.kt`
+  caches semantic responses by item context
+- `src/main/resources/suggestions/locale-aliases.json`
+  stores locale, country, and language aliases such as `fr <-> french/france` and `vi <-> vietnamese/vietnam`
 - `src/main/kotlin/com/internal/refactorassistant/selection/TypeGrouping.kt`
   maps items into review groups
 - `src/main/kotlin/com/internal/refactorassistant/selection/ReviewSelectionCoordinator.kt`
@@ -406,9 +549,26 @@ Lưu log của từng phiên preview/apply.
 - `src/main/kotlin/com/internal/refactorassistant/preview/PreviewBuilder.kt`
   builds preview rows and summary
 - `src/main/kotlin/com/internal/refactorassistant/executor/FilesystemApplyEngine.kt`
-  renames files and updates references
+  applies rename safely, skips binary-as-text reads, emits apply progress, and isolates per-item failures
 - `src/main/kotlin/com/internal/refactorassistant/executor/IdePostProcessor.kt`
-  reformats changed files
+  synchronizes VFS/documents and reformats changed files to avoid file cache conflicts
+- `src/main/kotlin/com/internal/refactorassistant/ui/ApplyResultDialog.kt`
+  shows the final result table with `SUCCESS / FAILED / SKIPPED / BLOCKED`
+
+## Implementation Notes | Ghi chú triển khai
+
+- Grouping:
+  items are grouped by `type + normalized oldName`. One canonical new name is selected per group and reused across identical items unless a real item-specific conflict exists.
+- Normalization:
+  every candidate is normalized before ranking and apply. The normalizer removes exact duplicates, collapses semantic duplicates, keeps valid system tokens, and prevents outputs like `screen_screen`, `info_info`, `MainHomeActivity`, or `ic_setting_preference`.
+- AI-first pipeline:
+  when AI mode is enabled and a valid API key exists, the plugin collects code context first, calls Gemini first, then merges rule-based candidates, reverse abbreviations, and locale aliases before ranking and canonical selection.
+- Apply safety:
+  text files are processed as UTF-8 text only for known text extensions. Binary resources such as `.png`, `.webp`, `.jpg`, `.ttf`, `.otf`, `.pdf`, `.mp3`, and `.wav` are never read as text and are only renamed by path/file rename.
+- IDE cache safety:
+  for in-project text files, the plugin prefers IntelliJ document/VFS updates and then synchronizes documents/VFS after apply so open editors do not drift from on-disk state.
+- Apply progress and result:
+  during apply, the progress indicator shows processed count, current item, success, failed, and skipped counters. After apply, the plugin keeps the final result dialog open and shows the updated per-item table instead of closing immediately.
 
 ### Storage and reporting
 
@@ -416,6 +576,10 @@ Lưu log của từng phiên preview/apply.
   reads and writes JSON data
 - `src/main/kotlin/com/internal/refactorassistant/report/SessionRecordFactory.kt`
   builds preview/apply session records
+- `src/main/kotlin/com/internal/refactorassistant/settings/GeminiSettingsService.kt`
+  stores Gemini provider configuration in IDE settings
+- `src/main/kotlin/com/internal/refactorassistant/settings/GeminiSettingsConfigurable.kt`
+  renders the settings UI for API key and Gemini mode
 
 ### UI
 

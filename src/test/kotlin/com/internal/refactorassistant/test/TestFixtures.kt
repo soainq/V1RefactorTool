@@ -55,6 +55,7 @@ object TestFixtures {
         applySelected = applySelected,
         status = "READY",
         warning = warning,
+        providerUsed = "rule-based",
     )
 
     fun settings(versionLabel: String = "reskin_v1"): ScanSettings = ScanSettings(

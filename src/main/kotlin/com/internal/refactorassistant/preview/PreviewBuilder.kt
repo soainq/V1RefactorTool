@@ -55,6 +55,10 @@ class PreviewBuilder(
                 path = item.item.displayPath,
                 status = status,
                 warning = reason,
+                providerUsed = item.providerUsed,
+                semanticConfidence = item.semanticConfidence?.toString().orEmpty(),
+                semanticExplanation = item.semanticExplanation,
+                rawAiCandidates = item.rawAiCandidates.joinToString(", "),
             )
         }
 

@@ -6,6 +6,14 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.androidstudio</depends>
 
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.internal.refactorassistant.settings.GeminiSettingsConfigurable"
+                id="com.internal.project.refactor.assistant.settings"
+                displayName="Android Studio V1_Refactor Plugin"/>
+    </extensions>
+
     <actions>
         <group id="InternalProjectRefactorAssistant.Group"
                text="Internal Refactor"

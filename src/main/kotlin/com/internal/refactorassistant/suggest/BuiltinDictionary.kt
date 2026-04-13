@@ -1,7 +1,12 @@
 package com.internal.refactorassistant.suggest
 
 object BuiltinDictionary {
-    private val defaultData: SuggestionData by lazy { SuggestionDataLoader().loadDefault() }
+    private val loadResult: SuggestionDataLoadResult by lazy { SuggestionDataLoader().loadDefaultSafely() }
+    private val defaultData: SuggestionData
+        get() = loadResult.data
+
+    val loadWarnings: List<String>
+        get() = loadResult.warnings
 
     val exactPhraseSynonyms: Map<String, List<String>>
         get() = defaultData.exactPhraseSynonyms
@@ -14,6 +19,9 @@ object BuiltinDictionary {
 
     val wholePhraseReplacements: Map<String, List<String>>
         get() = defaultData.wholePhraseReplacements
+
+    val localeAliases: Map<String, List<String>>
+        get() = defaultData.localeAliases
 
     val doNotReplaceTokens: Set<String>
         get() = defaultData.doNotReplaceTokens

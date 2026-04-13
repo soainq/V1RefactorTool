@@ -1,5 +1,6 @@
 package com.internal.refactorassistant.selection
 
+import com.internal.refactorassistant.ai.provider.HybridSuggestionCoordinator
 import com.internal.refactorassistant.model.GroupSelectionInfo
 import com.internal.refactorassistant.model.RefactorItemType
 import com.internal.refactorassistant.model.RefactorSelectionGroup
@@ -9,13 +10,12 @@ import com.internal.refactorassistant.model.ScannedRefactorItem
 import com.internal.refactorassistant.model.SafetyLevel
 import com.internal.refactorassistant.model.SuggestionSource
 import com.internal.refactorassistant.model.UsedNamesRegistry
-import com.internal.refactorassistant.suggest.SuggestionService
 
 class ReviewSelectionCoordinator(
     private val allItems: List<ScannedRefactorItem>,
     private val registry: UsedNamesRegistry,
     private val existingNamesByType: Map<RefactorItemType, Set<String>> = emptyMap(),
-    private val suggestionService: SuggestionService = SuggestionService(),
+    private val suggestionCoordinator: HybridSuggestionCoordinator = HybridSuggestionCoordinator(),
 ) {
     private val selectedGroups = defaultSelectedGroups(allItems).toMutableSet()
     private val itemSelectionOverrides = mutableMapOf<String, Boolean>()
@@ -24,7 +24,7 @@ class ReviewSelectionCoordinator(
     private var showPreviouslyUsedNames: Boolean = false
 
     init {
-        suggestionService.buildReviewItems(
+        suggestionCoordinator.buildReviewItems(
             items = currentActiveItems(),
             registry = registry,
             existingNamesByType = existingNamesByType,
@@ -99,7 +99,7 @@ class ReviewSelectionCoordinator(
 
     private fun rebuild(): ReviewScreenState {
         val activeItems = currentActiveItems()
-        val baseItems = suggestionService.buildReviewItems(
+        val baseItems = suggestionCoordinator.buildReviewItems(
             items = activeItems,
             registry = registry,
             existingNamesByType = existingNamesByType,

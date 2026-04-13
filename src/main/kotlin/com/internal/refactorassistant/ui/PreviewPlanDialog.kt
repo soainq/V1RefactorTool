@@ -74,6 +74,10 @@ class PreviewPlanDialog(
                 appendLine("Override Status: ${row.overrideStatus}")
                 appendLine("Suggestion Source: ${row.suggestionSource}")
                 appendLine("Candidate Rank: ${row.candidateRank}")
+                appendLine("Provider Used: ${row.providerUsed}")
+                appendLine("AI Confidence: ${row.semanticConfidence.ifBlank { "N/A" }}")
+                appendLine("AI Explanation: ${row.semanticExplanation.ifBlank { "None" }}")
+                appendLine("Raw AI Candidates: ${row.rawAiCandidates.ifBlank { "None" }}")
                 appendLine("Safety: ${row.safetyLevel.name}")
                 appendLine("Module: ${row.moduleName}")
             }
@@ -140,6 +144,10 @@ class PreviewPlanDialog(
             "Override Status",
             "Suggestion Source",
             "Candidate Rank",
+            "Provider Used",
+            "AI Confidence",
+            "AI Explanation",
+            "Raw AI Candidates",
             "Safety",
             "Module",
         )

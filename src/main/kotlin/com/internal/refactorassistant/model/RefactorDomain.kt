@@ -82,12 +82,13 @@ data class UsedNameMetadata(
 enum class SuggestionSource(
     val rank: Int,
 ) {
-    EXACT_PHRASE(1),
-    TOKEN_SYNONYM(2),
-    TOKEN_ABBREVIATION(3),
-    WHOLE_PHRASE_REPLACEMENT(4),
-    RULE_FALLBACK(5),
-    MANUAL(6),
+    GEMINI_SEMANTIC(1),
+    EXACT_PHRASE(2),
+    TOKEN_SYNONYM(3),
+    TOKEN_ABBREVIATION(4),
+    WHOLE_PHRASE_REPLACEMENT(5),
+    RULE_FALLBACK(6),
+    MANUAL(7),
 }
 
 data class SuggestionCandidate(
@@ -139,6 +140,10 @@ data class ReviewItemState(
     var applySelected: Boolean,
     var status: String,
     var warning: String,
+    val providerUsed: String = "rule-based",
+    val semanticConfidence: Double? = null,
+    val semanticExplanation: String = "",
+    val rawAiCandidates: List<String> = emptyList(),
 )
 
 data class ReviewValidation(
@@ -163,6 +168,10 @@ data class PreviewRow(
     val path: String,
     val status: String,
     val warning: String,
+    val providerUsed: String,
+    val semanticConfidence: String,
+    val semanticExplanation: String,
+    val rawAiCandidates: String,
 )
 
 data class PreviewSummary(
@@ -264,10 +273,12 @@ data class ApplyResult(
     val appliedCount: Int,
     val skippedCount: Int,
     val failedCount: Int,
+    val blockedCount: Int,
     val warnings: List<String>,
     val errors: List<String>,
     val changedFiles: List<String>,
     val sessionLogPath: String,
+    val rows: List<ApplyResultRow>,
 )
 
 data class ApplyExecutionOutcome(
@@ -277,4 +288,22 @@ data class ApplyExecutionOutcome(
     val warnings: List<String>,
     val errors: List<String>,
     val changedFiles: List<String>,
+)
+
+data class ApplyResultRow(
+    val type: RefactorItemType,
+    val before: String,
+    val after: String,
+    val finalStatus: String,
+    val reason: String,
+    val path: String,
+)
+
+data class ApplyProgressUpdate(
+    val totalItems: Int,
+    val processedItems: Int,
+    val successCount: Int,
+    val failedCount: Int,
+    val skippedCount: Int,
+    val currentItemLabel: String,
 )

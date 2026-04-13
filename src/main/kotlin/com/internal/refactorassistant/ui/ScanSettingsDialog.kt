@@ -10,10 +10,13 @@ import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.internal.refactorassistant.model.ScanSettings
+import com.internal.refactorassistant.settings.GeminiProviderMode
+import com.internal.refactorassistant.settings.GeminiSettingsService
 import com.internal.refactorassistant.settings.WorkflowDefaults
 import java.awt.BorderLayout
 import java.awt.Dimension
 import javax.swing.BoxLayout
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -23,6 +26,7 @@ class ScanSettingsDialog(
     private val loadWarnings: List<String>,
     initialSettings: ScanSettings? = null,
 ) : DialogWrapper(project, true) {
+    private val geminiSettingsService = GeminiSettingsService.getInstance()
     private val moduleCheckboxes = moduleNames.map { moduleName -> JBCheckBox(moduleName, true) }
     private val scanKotlinFilesCheckbox = JBCheckBox("Scan Kotlin class/file", initialSettings?.scanKotlinClassesFiles ?: true)
     private val scanActivityCheckbox = JBCheckBox("Scan Activity", initialSettings?.scanActivities ?: true)
@@ -40,6 +44,9 @@ class ScanSettingsDialog(
         wrapStyleWord = true
         text = initialSettings?.note.orEmpty()
     }
+    private val aiEnabledCheckbox = JBCheckBox("Enable AI semantic provider")
+    private val providerModeComboBox = JComboBox(GeminiProviderMode.entries.toTypedArray())
+    private val aiStatusLabel = JBLabel()
 
     init {
         if (initialSettings != null) {
@@ -47,6 +54,10 @@ class ScanSettingsDialog(
                 checkbox.isSelected = checkbox.text in initialSettings.selectedModules
             }
         }
+        val geminiSettings = geminiSettingsService.currentResolved()
+        aiEnabledCheckbox.isSelected = geminiSettings.enableGeminiSemanticProvider
+        providerModeComboBox.selectedItem = geminiSettings.providerMode
+        updateAiStatusLabel()
     }
 
     init {
@@ -78,6 +89,10 @@ class ScanSettingsDialog(
         val form = FormBuilder.createFormBuilder()
             .addLabeledComponent("Modules", JBScrollPane(modulesPanel))
             .addLabeledComponent("Scan options", scanOptionsPanel)
+            .addComponent(JBLabel("<html><b>AI provider</b></html>"))
+            .addComponent(aiEnabledCheckbox)
+            .addLabeledComponent("Provider mode", providerModeComboBox)
+            .addComponent(aiStatusLabel)
             .addLabeledComponent("Version label", versionField)
             .addLabeledComponent("Note", JBScrollPane(noteField))
             .panel
@@ -95,6 +110,8 @@ class ScanSettingsDialog(
             )
         }
         root.add(form, BorderLayout.CENTER)
+        aiEnabledCheckbox.addActionListener { updateAiStatusLabel() }
+        providerModeComboBox.addActionListener { updateAiStatusLabel() }
         return root
     }
 
@@ -136,4 +153,24 @@ class ScanSettingsDialog(
         versionLabel = versionField.text.trim().ifBlank { WorkflowDefaults.DEFAULT_VERSION_LABEL },
         note = noteField.text.trim(),
     )
+
+    fun applyAiSettings() {
+        geminiSettingsService.update {
+            enableGeminiSemanticProvider = aiEnabledCheckbox.isSelected
+            providerMode = providerModeComboBox.selectedItem as? GeminiProviderMode ?: GeminiProviderMode.RULE_BASED_ONLY
+        }
+    }
+
+    private fun updateAiStatusLabel() {
+        val effectiveKey = geminiSettingsService.maskedEffectiveApiKey()
+        val mode = providerModeComboBox.selectedItem as? GeminiProviderMode ?: GeminiProviderMode.RULE_BASED_ONLY
+        aiStatusLabel.text = when {
+            !aiEnabledCheckbox.isSelected || mode == GeminiProviderMode.RULE_BASED_ONLY ->
+                "AI status: rule-based only"
+            effectiveKey.isBlank() ->
+                "AI status: API key required. A prompt will appear before scan."
+            else ->
+                "AI status: key configured ($effectiveKey)"
+        }
+    }
 }
