@@ -1,13 +1,50 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.util.Properties
 
 plugins {
     kotlin("jvm") version "2.2.20"
-    id("org.jetbrains.intellij.platform") version "2.13.1"
+    id("org.jetbrains.intellij.platform") version "2.14.0"
 }
 
 group = "com.internal"
-version = "0.1.0"
+
+val pluginBaseVersion = providers.gradleProperty("pluginBaseVersion").orElse("0.3.0").get()
+val versionSequenceFile = rootDir.resolve(".internal-refactor-assistant/build-sequence.properties")
+val producesVersionedBuild = gradle.startParameter.taskNames.any { requestedTask ->
+    val taskName = requestedTask.substringAfterLast(':')
+    taskName in setOf("build", "buildPlugin", "assemble", "jar", "composedJar", "publishPlugin", "runIde")
+}
+val buildSequenceIncrementMarker = "internal.refactorassistant.buildSequenceIncremented"
+
+fun nextBuildSequence(): Int {
+    versionSequenceFile.parentFile.mkdirs()
+    val properties = Properties()
+    if (versionSequenceFile.exists()) {
+        versionSequenceFile.inputStream().use(properties::load)
+    }
+    val current = properties.getProperty("buildSequence")?.toIntOrNull() ?: 0
+    val shouldIncrement = producesVersionedBuild &&
+        gradle.parent == null &&
+        System.getProperty(buildSequenceIncrementMarker) != "true"
+    val next = if (shouldIncrement) current + 1 else current
+    if (shouldIncrement) {
+        properties["buildSequence"] = next.toString()
+        properties["lastUpdatedUtc"] = OffsetDateTime.now(ZoneOffset.UTC).toString()
+        versionSequenceFile.outputStream().use { output ->
+            properties.store(output, "Local incremental build sequence")
+        }
+        System.setProperty(buildSequenceIncrementMarker, "true")
+    }
+    return next
+}
+
+val buildSequence = nextBuildSequence()
+val pluginBuildVersion = "$pluginBaseVersion-build.$buildSequence"
+
+version = pluginBuildVersion
 
 val androidStudioVersion = providers.gradleProperty("androidStudioVersion").get()
 val androidStudioLocalPath = providers.gradleProperty("androidStudioLocalPath").orNull?.takeIf { it.isNotBlank() }
@@ -24,7 +61,6 @@ repositories {
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.18.3")
-    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.3")
     testImplementation(kotlin("test"))
 
     intellijPlatform {
@@ -33,12 +69,6 @@ dependencies {
         } else {
             androidStudio(androidStudioVersion)
         }
-
-        bundledPlugin("org.jetbrains.android")
-        bundledPlugin("com.intellij.java")
-        bundledPlugin("org.jetbrains.kotlin")
-        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
-        testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.JUnit5)
     }
 }
 
@@ -49,7 +79,6 @@ kotlin {
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_21)
-        freeCompilerArgs.add("-Xjvm-default=all")
     }
 }
 
@@ -59,30 +88,35 @@ tasks.test {
 
 intellijPlatform {
     pluginConfiguration {
+        version.set(pluginBuildVersion)
         ideaVersion {
             sinceBuild.set(pluginSinceBuild)
             untilBuild.set(pluginUntilBuild)
         }
-        vendor {
-            name.set("Internal Tooling")
-        }
         name.set("Internal Project Refactor Assistant")
         description.set(
             """
-            Internal Android Studio plugin that duplicates template Android projects by generating a refactor plan,
-            previewing changes, and applying package/source/resource renames with reporting.
+            Android Studio plugin for repeated reskin/refactor workflows with scan, suggestion review, preview, apply, and local JSON history.
             """.trimIndent()
         )
+        vendor {
+            name.set("Internal Tooling")
+        }
     }
 }
 
 tasks {
-    patchPluginXml {
-        sinceBuild.set(pluginSinceBuild)
-        untilBuild.set(pluginUntilBuild)
+    register("printBuildVersion") {
+        group = "versioning"
+        description = "Prints the current plugin version and local build sequence."
+        doLast {
+            println("pluginVersion=$pluginBuildVersion")
+            println("buildSequence=$buildSequence")
+            println("sequenceFile=${versionSequenceFile.absolutePath}")
+        }
     }
 
     wrapper {
-        gradleVersion = "8.10.2"
+        gradleVersion = "9.0.0"
     }
 }

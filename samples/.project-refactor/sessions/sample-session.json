@@ -1,0 +1,55 @@
+{
+  "sessionId": "sample-session",
+  "timestamp": "2026-04-10T10:31:00+07:00",
+  "mode": "PREVIEW",
+  "versionLabel": "reskin_v1",
+  "userNote": "first reskin preview",
+  "selectedTypes": [
+    "ACTIVITY",
+    "LAYOUT_FILE"
+  ],
+  "selectedItemCount": 2,
+  "summary": {
+    "totalItems": 3,
+    "selectedItems": 2,
+    "skippedItems": 1,
+    "blockedItems": 0,
+    "appliedItems": 0,
+    "failedItems": 0
+  },
+  "items": [
+    {
+      "type": "ACTIVITY",
+      "oldName": "MainActivity",
+      "suggestedNames": [
+        "HomeActivity",
+        "DashboardActivity",
+        "LandingActivity"
+      ],
+      "selectedNewName": "HomeActivity",
+      "result": "PREVIEWED",
+      "warning": null
+    },
+    {
+      "type": "LAYOUT",
+      "oldName": "activity_main",
+      "suggestedNames": [
+        "activity_home",
+        "activity_dashboard"
+      ],
+      "selectedNewName": "activity_home",
+      "result": "PREVIEWED",
+      "warning": null
+    },
+    {
+      "type": "PACKAGE_CHILD",
+      "oldName": "com.example.app.feature.main",
+      "suggestedNames": [
+        "com.example.app.feature.home"
+      ],
+      "selectedNewName": "com.example.app.feature.home",
+      "result": "BLOCKED",
+      "warning": "Package rename apply is disabled in this milestone."
+    }
+  ]
+}

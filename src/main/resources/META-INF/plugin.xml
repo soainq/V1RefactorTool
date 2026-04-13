@@ -4,25 +4,26 @@
     <vendor>Internal Tooling</vendor>
 
     <depends>com.intellij.modules.platform</depends>
-    <depends>com.intellij.modules.java</depends>
     <depends>com.intellij.modules.androidstudio</depends>
-    <depends>org.jetbrains.android</depends>
-    <depends>org.jetbrains.kotlin</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <notificationGroup id="Internal Project Refactor Assistant" displayType="BALLOON" isLogByDefault="true"/>
+        <applicationConfigurable
+                parentId="tools"
+                instance="com.internal.refactorassistant.settings.GeminiSettingsConfigurable"
+                id="com.internal.project.refactor.assistant.settings"
+                displayName="Android Studio V1_Refactor Plugin"/>
     </extensions>
 
     <actions>
         <group id="InternalProjectRefactorAssistant.Group"
                text="Internal Refactor"
-               description="Internal template duplication tools"
+               description="Internal refactor preview tools"
                popup="true">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
-            <action id="InternalProjectRefactorAssistant.DuplicateTemplateProject"
-                    class="com.internal.refactorassistant.action.DuplicateTemplateProjectAction"
-                    text="Duplicate Template Project"
-                    description="Generate and apply a safe refactor plan for duplicating a template Android project"/>
+            <action id="InternalProjectRefactorAssistant.StartReskinRefactor"
+                    class="com.internal.refactorassistant.action.StartReskinRefactorAction"
+                    text="Start Reskin Refactor Workflow"
+                    description="Scan, review, preview, and apply safe repeated reskin/refactor changes"/>
         </group>
     </actions>
 </idea-plugin>
